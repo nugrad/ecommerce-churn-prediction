@@ -1,0 +1,27 @@
+{
+  "best_threshold": 0.37374886870384216,
+  "baseline": {
+    "model": "Baseline (LR)",
+    "auc_roc": 0.5345271456180484,
+    "auc_pr": 0.033144000086431646,
+    "f1_min": 0.061571582346609255
+  },
+  "xgb_default": {
+    "model": "XGBoost (default)",
+    "auc_roc": 0.5845453380137257,
+    "auc_pr": 0.03930238635044742,
+    "f1_min": 0.07168373422243392
+  },
+  "xgb_tuned": {
+    "model": "XGBoost (Optuna tuned)",
+    "auc_roc": 0.5742897570403092,
+    "auc_pr": 0.03822060871394776,
+    "f1_min": 0.0035026269702276708
+  },
+  "xgb_final": {
+    "model": "XGBoost (threshold=0.374)",
+    "auc_roc": 0.5742897570403092,
+    "auc_pr": 0.03822060871394776,
+    "f1_min": 0.07794820216243399
+  }
+}

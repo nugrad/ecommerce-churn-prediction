@@ -1,0 +1,15 @@
+# Python environment
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.ipynb_checkpoints/
+
+# Raw data — large files, not needed for deployment
+data/raw/
+
+# These are NOT ignored — deployment needs them:
+# models/xgb_tuned.pkl
+# models/metrics.json
+# data/processed/feature_matrix.csv
