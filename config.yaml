@@ -1,0 +1,45 @@
+# Project configuration
+# All tunable parameters live here — not hardcoded in source files
+
+project:
+  name: "ecommerce-churn-prediction"
+  version: "1.0.0"
+  dataset: "Olist Brazilian E-Commerce (public)"
+
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  feature_matrix: "data/processed/feature_matrix.csv"
+
+churn:
+  definition: "repeat_purchase"
+  minority_class: "will_return = 1 (customer placed 2+ orders)"
+  majority_class: "will_return = 0 (customer placed exactly 1 order)"
+
+model:
+  name: "XGBoostClassifier"
+  tuner: "Optuna"
+  n_trials: 50
+  cv_folds: 3
+  threshold: 0.3737
+  path: "models/xgb_tuned.pkl"
+  metrics_path: "models/metrics.json"
+
+features:
+  total: 19
+  groups:
+    - delivery    # delay, speed, lateness
+    - review      # score, flags
+    - time        # hour, day, month, weekend
+    - geography   # state rate, SP, remote
+    - approval    # speed, slow flag
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  max_batch_size: 500
+
+risk_tiers:
+  likely_to_return: 0.20
+  uncertain: 0.10
+  at_risk: 0.0
