@@ -1,0 +1,159 @@
+## Problem Understanding
+Q: Why did you reframe from snapshot churn to repeat purchase prediction?
+A: Snapshot approach produced 99.3% churn — structurally unlearnable.
+   93.6% of customers buy exactly once on Olist regardless of time window.
+   Repeat purchase prediction gives a 32:1 ratio — still imbalanced but learnable.
+   It's also more actionable: you score a customer right after first delivery.
+
+Q: How did you define "churned" in your final model?
+A: will_return = 0 if the customer placed exactly one order ever.
+   will_return = 1 if they placed two or more orders.
+   Binary classification on first-order behavioral features only.
+
+Q: What is the business value of this model?
+A: Rank customers by return probability immediately after first delivery.
+   High-risk customers get retention offers within 24 hours.
+   At scale: 1,000 customers/week, 12% recovery rate, $80 AOV
+   = roughly $9,600 recovered revenue per week.
+
+Q: Why is your model only trained on first-order features?
+A: Because in production you score a customer right after their first delivery.
+   You don't have second-order data yet — it doesn't exist.
+   Using all-order data would be data leakage.
+------------------
+## Data and Feature Engineering
+Q: Why did you drop canceled and non-delivered orders?
+A: Delivery features are our strongest signals.
+   A canceled order has no delivery time, no real review behavior.
+   Including them would introduce noise into our primary feature group.
+
+Q: Why did you treat missing review scores as 3.0 rather than dropping them?
+A: Missing review is informative — disengaged customers don't bother reviewing.
+   Dropping them loses this signal entirely.
+   We created has_review as a separate binary feature to preserve 
+   the missingness signal, then filled score with 3.0 (neutral) for continuity.
+
+First — Understanding The Data Granularity Problem
+This is the most important concept to understand before listing features:
+RAW DATA GRANULARITY:
+  orders table     → one row per ORDER
+  customers table  → one row per CUSTOMER ID (transactional)
+  reviews table    → one row per REVIEW
+
+PROBLEM:
+  One customer_unique_id can have multiple orders.
+  Customer "abc123" might have 3 rows in orders table.
+  A model needs ONE row per customer.
+
+SOLUTION:
+  We isolate ONLY the first order per customer.
+  All features are derived from that first order exclusively.
+
+WHY FIRST ORDER ONLY:
+  In production you score a customer right after
+  their first delivery — before you know if they'll return.
+  Second order data doesn't exist yet at scoring time.
+  Using it would be data leakage.
+------------------
+## Modeling
+Q: Why XGBoost over Random Forest or a neural network?
+A: Three reasons:
+   1. scale_pos_weight handles 32:1 imbalance natively
+   2. SHAP TreeExplainer gives exact explanations — not approximations
+   3. 93k rows doesn't justify a neural network — 
+      tree models are optimal at this scale
+   Random Forest doesn't have an equivalent to scale_pos_weight.
+
+Q: Why not SMOTE for the imbalanced classes?
+A: SMOTE generates synthetic minority samples.
+   With 2,801 real minority samples at 32:1 ratio, 
+   SMOTE would create ~87,000 fake customers.
+   The model would learn from synthetic noise, not real behavior.
+   scale_pos_weight works on the real distribution — no fabrication.
+
+Q: Why Optuna over GridSearch?
+A: GridSearch is exhaustive and doesn't learn from results.
+   Optuna uses Tree Parzen Estimator — a Bayesian approach.
+   It identifies promising hyperparameter regions and samples them more.
+   50 smart trials outperform 500 blind trials in both speed and result.
+
+Q: Why is your AUC-ROC only 0.58?
+A: Two reasons — both honest:
+   1. Missing high-signal features: product category, order value, 
+      seller rating. Not available in the public dataset.
+   2. Non-subscription marketplaces have weak repeat-purchase signals.
+      First-order behavior explains a small fraction of return intent.
+   The model delivers +30% AUC-PR lift over random — real but limited value.
+   Documenting this is more valuable than inflating the number.
+
+Q: Why did you optimize the threshold at 0.374 instead of using 0.5?
+A: Default 0.5 assumes balanced classes.
+   With 97% majority, model probabilities are biased downward.
+   Almost no customer scores above 0.5.
+   We used the Precision-Recall curve to find the threshold
+   that maximizes F1 on the minority class — which was 0.374.
+
+Q: What's the difference between AUC-ROC and AUC-PR?
+   Which matters more here and why?
+A: AUC-ROC measures overall ranking quality across all thresholds.
+   AUC-PR focuses specifically on the positive (minority) class.
+   With severe imbalance, a high AUC-ROC can be misleading
+   because it includes the large negative class performance.
+   AUC-PR is more honest here — it only measures how well
+   we find the rare returners, which is the actual business goal.
+---------------------------
+## System Design
+Q: Why did you build a FastAPI endpoint instead of just a batch script?
+A: Different use cases need different serving patterns.
+   Batch script → weekly campaign: score all 93k, produce CSV, CRM uploads it.
+   API → real-time trigger: score one customer the moment their order delivers.
+   Both are built. They share the same model artifact and threshold.
+
+Q: What does Docker actually solve in this project?
+A: Environment reproducibility.
+   "Works on my machine" is worthless in production.
+   Docker packages Python version, all libraries, model file, and code
+   into a single container that runs identically on any machine or cloud.
+
+Q: How would you monitor this model in production?
+A: Three layers:
+   1. Data drift: Evidently AI to detect when feature distributions shift
+      e.g. if delivery speeds improve across the board, 
+      the model's learned thresholds become stale
+   2. Performance drift: track AUC-ROC on new labeled data monthly
+   3. Business metrics: actual campaign conversion rate vs model predictions
+      If recovery rate drops, trigger retraining.
+
+Q: What would you add to this system with 2 more weeks?
+A: In priority order:
+   1. Integrate order_items_dataset.csv — product category is the 
+      single most valuable missing feature
+   2. MLflow experiment tracking — systematic run comparison
+   3. Retraining pipeline triggered by drift detection
+   4. A/B test framework to measure if campaigns actually work
+-----------------------------
+## Deployment and Engineering
+Q: How would you retrain the model when it degrades?
+A: Define a performance threshold — e.g. AUC-ROC drops below 0.54.
+   Monitor weekly with a holdout set of newly labeled customers.
+   On trigger: run full pipeline (data_pipeline → features → train)
+   with the new data appended. Compare new model vs current.
+   Deploy new model only if it beats current on holdout.
+
+Q: How does your API handle bad input data?
+A: Pydantic validates every field on every request.
+   Wrong type → auto-rejected with 422 error and field-level message.
+   Out-of-range value (review score > 5) → rejected.
+   Missing field → rejected.
+   Zero validation code written manually — Pydantic handles all of it.
+
+Q: If this API needs to handle 10,000 requests per second,
+   what would you change?
+A: Current design is single-process uvicorn — not built for that.
+   Changes needed:
+   1. Multiple uvicorn workers (--workers 4)
+   2. Load balancer in front (nginx)
+   3. Model loaded once per worker via startup event
+   4. Switch from joblib to ONNX format for faster inference
+   5. Redis cache for repeated identical inputs
+   6. Kubernetes for horizontal scaling
